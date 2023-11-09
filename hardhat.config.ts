@@ -9,8 +9,12 @@ const config: HardhatUserConfig = {
         // eslint-disable-next-line
         enabled: true,
         url: `https://eth-mainnet.g.alchemy.com/v2/-iaW8mbxNWhkXUV7rQUl5roCcVo7BdYM`,
-      }
+      },
+      gas: 2000000,
     }
+  },
+  mocha: {
+    timeout: 0
   }
 };
 

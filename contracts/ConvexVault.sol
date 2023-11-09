@@ -2,7 +2,7 @@
 pragma solidity ^0.8.1;
 
 // Uncomment this line to use console.log
-// import "hardhat/console.sol";
+import "hardhat/console.sol";
 
 // Import necessary interfaces and libraries
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -40,14 +40,16 @@ contract ConvexVault is Ownable {
         IERC20(0x4e3FBD56CD56c3e72c1403e103b45Db9da5B9D2B);
     IERC20 public constant CrvToken =
         IERC20(0xD533a949740bb3306d119CC777fa900bA034cd52);
-    IClaimZap public constant ClaimZap =
-        IClaimZap(0x3f29cB4111CbdA8081642DA1f75B3c12DECf2516);
     uint private constant MULTIPLIER = 1e18;
 
     uint256 public totalSupply = 0;
 
     mapping(address => UserInfo) public userInfo;
     RewardIndex public rewardIndex;
+
+    event Deposited(address indexed user, uint256 amount);
+    event Withdrawn(address indexed user, uint256 amount);
+    event Claimed(address indexed user, uint256 crvAmount, uint256 cvxAmount);
 
     // Specify LP pool
     constructor(uint256 _pid) {
@@ -94,12 +96,14 @@ contract ConvexVault is Ownable {
     function deposit(uint256 _amount) external {
         require(_amount > 0, "Amount must be greater than 0");
 
-        // Get rewards from Curve
-        getRewards();
+        // Get rewards from Convex and update rewards
+        if (totalSupply > 0) {
+            getRewards();
+            _updateRewards(msg.sender);
+        }
 
         (address lpToken, , , , , ) = getConvexPoolInfo();
         UserInfo storage user = userInfo[msg.sender];
-        _updateRewards(msg.sender);
 
         IERC20(lpToken).transferFrom(
             address(msg.sender),
@@ -111,6 +115,9 @@ contract ConvexVault is Ownable {
         totalSupply = totalSupply.add(_amount);
 
         vaultStake();
+
+        // Emit event
+        emit Deposited(msg.sender, _amount);
     }
 
     // Withdraw LP tokens from the vault
@@ -128,6 +135,9 @@ contract ConvexVault is Ownable {
         user.amount = user.amount.sub(_amount);
         totalSupply = totalSupply.sub(_amount);
         IERC20(lpToken).transfer(address(msg.sender), _amount);
+
+        // Emit event
+        emit Withdrawn(msg.sender, _amount);
     }
 
     function claim(address _account) public {
@@ -147,26 +157,17 @@ contract ConvexVault is Ownable {
             user.reward.crvEarned = 0;
             CrvToken.transfer(_account, crvReward);
         }
+
+        // Emit event
+        emit Claimed(_account, crvReward, cvxReward);
     }
 
     function getRewards() public {
         uint256 crvBalance = CrvToken.balanceOf(address(this));
         uint256 cvxBalance = CvxToken.balanceOf(address(this));
+
         (, , , address crvReward, , ) = getConvexPoolInfo();
-        address[] memory emptyArray;
-        address[] memory rewardArray = new address[](1);
-        rewardArray[0] = crvReward;
-        ClaimZap.claimRewards(
-            rewardArray,
-            emptyArray,
-            emptyArray,
-            emptyArray,
-            0,
-            0,
-            0,
-            0,
-            0
-        );
+        IBaseRewardPool(crvReward).getReward();
 
         uint256 updatedCrvBalance = CrvToken.balanceOf(address(this));
         uint256 updatedCvxBalance = CvxToken.balanceOf(address(this));
@@ -181,7 +182,7 @@ contract ConvexVault is Ownable {
         }
     }
 
-    function vaultStake() public {
+    function vaultStake() internal {
         (address lpToken, , , , , ) = getConvexPoolInfo();
         uint balance = IERC20(lpToken).balanceOf(address(this));
         IERC20(lpToken).approve(address(CvxBooster), balance);

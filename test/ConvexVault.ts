@@ -5,9 +5,9 @@ import {
 } from "@nomicfoundation/hardhat-toolbox/network-helpers";
 import { expect, } from "chai";
 import { artifacts, ethers, network } from "hardhat";
-import { IBooster__factory, IERC20__factory } from "../typechain-types";
+import { IBaseRewardPool__factory, IBooster__factory, IERC20__factory } from "../typechain-types";
 
-const lpToken = "0x845838DF265Dcd2c412A1Dc9e959c7d08537f8a2";
+const lpToken = "0xC25a3A3b969415c80451098fa907EC722572917F";
 const crvToken = "0xD533a949740bb3306d119CC777fa900bA034cd52";
 const cvxToken = "0x4e3FBD56CD56c3e72c1403e103b45Db9da5B9D2B";
 
@@ -18,14 +18,14 @@ describe("ConvexVault", function () {
   // and reset Hardhat Network to that snapshot in every test.
   async function deployConvexVault() {
 
-    // DAI/USDC LP pool
-    const pid = 0;
+    // sCRV LP pool
+    const pid = 4;
 
     // Contracts are deployed using the first signer/account by default
     const [owner, otherAccount] = await ethers.getSigners();
 
     // Get LP token owner from mainnet
-    const lpOwnerAddress = "0x48CDB2914227fbc7F0259a5EA6De28e0b7f7B473";
+    const lpOwnerAddress = "0x9E51BE7071F086d3A1fD5Dc0016177473619b237";
     await network.provider.request({
       method: "hardhat_impersonateAccount",
       params: [lpOwnerAddress],
@@ -74,6 +74,7 @@ describe("ConvexVault", function () {
 
       // Get vault lp balance
       const userBalance = await (await convexVault.userInfo(lpOwner)).amount;
+      console.log(userBalance);
       expect(userBalance).to.equal(100);
 
       // Withdraw token from vault
@@ -83,16 +84,18 @@ describe("ConvexVault", function () {
       // Should be 50 reduced
       const lpBalanceAfter = await lpTokeContract.connect(owner).balanceOf(lpOwner);
       expect(lpBalanceBefore - lpBalanceAfter).to.equal(50);
-    }).timeout("120s");
+    });
 
   })
 
   describe("Claim reward from vault", function () {
-    it("Should claim correct amount from vault", async function () {
-      const { convexVault, pid, owner, lpOwner } = await loadFixture(deployConvexVault);
+    it("Should claim CRV/CVX from vault - single user", async function () {
+      const { convexVault, owner, lpOwner } = await loadFixture(deployConvexVault);
       const vaultAddress = await convexVault.getAddress();
 
-      const depositAmount = 1_000_000_000;
+      const [_lptoken, _token, _gauge, _crvRewards, _stash, _shutdown] = await convexVault.getConvexPoolInfo();
+
+      const depositAmount = 1e12;
 
       // Approve amount before deposit
       const lpTokenContract = IERC20__factory.connect(lpToken);
@@ -114,13 +117,18 @@ describe("ConvexVault", function () {
         .deposit(depositAmount);
 
       // Increae 1 hour for test reward
-      await time.increase(86400);
-      await mine();
-      await mine();
+      const block = await time.increase(3600 * 24);
+      console.log('Increased block:', block);
 
       // Claim rewards from vault
       await convexVault.connect(lpOwner)
         .claim(lpOwner.address);
+
+      // Calculate rewards
+      const rewardContract = (await IBaseRewardPool__factory.connect(_crvRewards));
+      const earnedCrv = await rewardContract.connect(lpOwner)
+        .earned(lpOwner.address);
+      console.log('Expected earned CRV:', earnedCrv)
 
       // Check rewards distributed
       const crvBalance2 = await crvTokenContract.connect(lpOwner)
@@ -128,12 +136,12 @@ describe("ConvexVault", function () {
       const cvxBalance2 = await cvxTokenContract.connect(lpOwner)
         .balanceOf(lpOwner);
 
-      expect(crvBalance2).to.greaterThan(crvBalance1);
-      expect(cvxBalance2).to.greaterThan(cvxBalance1);
-
       console.log('CRV earned', crvBalance2 - crvBalance1);
       console.log('CVX earned', cvxBalance2 - cvxBalance1);
-    }).timeout("120s");
-  })
 
+      expect(crvBalance2).to.greaterThan(crvBalance1);
+      expect(cvxBalance2).to.greaterThan(cvxBalance1);
+    });
+
+  })
 });

@@ -12,4 +12,8 @@ interface IBaseRewardPool {
     ) external returns (bool);
 
     function withdrawAllAndUnwrap(bool claim) external;
+
+    function getReward() external returns (bool);
+
+    function earned(address account) external view returns (uint256);
 }

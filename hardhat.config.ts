@@ -8,9 +8,10 @@ const config: HardhatUserConfig = {
       forking: {
         // eslint-disable-next-line
         enabled: true,
-        url: `https://eth-mainnet.g.alchemy.com/v2/-iaW8mbxNWhkXUV7rQUl5roCcVo7BdYM`,
+        // url: `https://eth-mainnet.g.alchemy.com/v2/-iaW8mbxNWhkXUV7rQUl5roCcVo7BdYM`,
+        url: `https://rpc.ankr.com/eth`,
       },
-      gas: 2000000,
+      gas: 10000000,
     }
   },
   mocha: {

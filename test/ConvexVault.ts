@@ -1,46 +1,56 @@
-import {
-  time,
-  loadFixture,
-  mine,
-} from "@nomicfoundation/hardhat-toolbox/network-helpers";
+import { mine, time } from "@nomicfoundation/hardhat-toolbox/network-helpers";
+import { HardhatEthersSigner as Signer } from "@nomicfoundation/hardhat-ethers/signers";
 import { expect, } from "chai";
-import { artifacts, ethers, network } from "hardhat";
-import { IBaseRewardPool__factory, IBooster__factory, IERC20__factory } from "../typechain-types";
+import { ethers, network } from "hardhat";
+import { ConvexVault, IERC20, IERC20__factory } from "../typechain-types";
 
+// sCRV LP pool
+const pid = 4;
 const lpToken = "0xC25a3A3b969415c80451098fa907EC722572917F";
+const whaleAddress = "0x9E51BE7071F086d3A1fD5Dc0016177473619b237";
+
 const crvToken = "0xD533a949740bb3306d119CC777fa900bA034cd52";
 const cvxToken = "0x4e3FBD56CD56c3e72c1403e103b45Db9da5B9D2B";
 
+
 describe("ConvexVault", function () {
 
-  // We define a fixture to reuse the same setup in every test.
-  // We use loadFixture to run this setup once, snapshot that state,
-  // and reset Hardhat Network to that snapshot in every test.
-  async function deployConvexVault() {
+  let owner: Signer, user1: Signer, user2: Signer, user3: Signer, user4: Signer;
+  let convexVault: ConvexVault;
+  let lpContract: IERC20, crvContract: IERC20, cvxContract: IERC20;
 
-    // sCRV LP pool
-    const pid = 4;
+  before(async () => {
 
     // Contracts are deployed using the first signer/account by default
-    const [owner, otherAccount] = await ethers.getSigners();
-
-    // Get LP token owner from mainnet
-    const lpOwnerAddress = "0x9E51BE7071F086d3A1fD5Dc0016177473619b237";
-    await network.provider.request({
-      method: "hardhat_impersonateAccount",
-      params: [lpOwnerAddress],
-    });
-    const lpOwner = await ethers.getSigner(lpOwnerAddress);
+    [owner, user1, user2, user3, user4] = await ethers.getSigners();
 
     const ConvexVault = await ethers.getContractFactory("ConvexVault");
-    const convexVault = await ConvexVault.deploy(pid);
+    convexVault = await ConvexVault.deploy(pid);
 
-    return { convexVault, pid, owner, lpOwner, otherAccount };
-  }
+    lpContract = IERC20__factory.connect(lpToken);
+    crvContract = IERC20__factory.connect(crvToken);
+    cvxContract = IERC20__factory.connect(cvxToken);
+
+    // Get LP token whale from mainnet
+    await network.provider.request({
+      method: "hardhat_impersonateAccount",
+      params: [whaleAddress],
+    });
+    const whale = await ethers.getSigner(whaleAddress);
+
+    // Transfer lp tokens to users
+    await lpContract.connect(whale)
+      .transfer(user1.address, ethers.parseEther("100"));
+    await lpContract.connect(whale)
+      .transfer(user2.address, ethers.parseEther("50"));
+    await lpContract.connect(whale)
+      .transfer(user3.address, ethers.parseEther("20"));
+    await lpContract.connect(whale)
+      .transfer(user4.address, ethers.parseEther("10"));
+  });
 
   describe("Deployment", function () {
     it("Should set the correct pool", async function () {
-      const { convexVault, pid, } = await loadFixture(deployConvexVault);
       expect(await convexVault.pid()).to.equal(pid);
 
       const { _lptoken, _token, _stash } = await convexVault.getConvexPoolInfo();
@@ -48,100 +58,226 @@ describe("ConvexVault", function () {
     });
 
     it("Should set the right owner", async function () {
-      const { convexVault, owner } = await loadFixture(deployConvexVault);
       expect(await convexVault.owner()).to.equal(owner.address);
+    });
+
+    it("Should have lp tokens for test user", async function () {
+      expect(await lpContract.connect(user3).balanceOf(user4)).to.equal(ethers.parseEther("10"));
     });
   });
 
-  describe("Deposit/Withdraw vault", function () {
+  describe("Deposit vault", function () {
 
-    it("Should withdraw correct amount to Convex pool", async function () {
-      const { convexVault, pid, owner, lpOwner } = await loadFixture(deployConvexVault);
+    it("Should deposit correct amount to Convex pool", async function () {
       const vaultAddress = await convexVault.getAddress();
 
       // Approve amount before deposit
-      const lpTokeContract = IERC20__factory.connect(lpToken);
-      await lpTokeContract.connect(lpOwner)
-        .approve(vaultAddress, 100, {
-          from: lpOwner
-        });
-
-      const lpBalanceBefore = await lpTokeContract.connect(owner).balanceOf(lpOwner);
+      const amount = 100;
+      await lpContract.connect(user1)
+        .approve(vaultAddress, amount);
 
       // Deposit token to vault
-      await convexVault.connect(lpOwner)
+      const ret = await ((await convexVault.connect(user1)
+        .deposit(amount))
+        .wait());
+
+      // Check event log
+      const events = ret?.logs.filter(x => x.address == vaultAddress)
+      expect(events?.length).eq(1, "Should receive 1 event");
+      if (events) {
+        expect(events[0].args[0]).eq(user1.address, "Emitted event not matched with signer");
+        expect(events[0].args[1]).eq(amount, "Emitted event not matched with amount");
+      }
+
+      // Get user's deposit amount
+      const userBalance = await (await convexVault.userInfo(user1.address)).amount;
+      expect(userBalance).to.equal(amount);
+    });
+
+    it("Failed deposit because of zero amount", async function () {
+      // Deposit token to vault
+      await expect(convexVault.connect(user1)
+        .deposit(0))
+        .to.be.revertedWith('Amount must be greater than 0');
+    });
+
+  })
+
+  describe("Withdraw vault", function () {
+
+    it("Should withdraw correct amount to Convex pool", async function () {
+      const vaultAddress = await convexVault.getAddress();
+
+      // Approve amount before deposit
+      await lpContract.connect(user1)
+        .approve(vaultAddress, 100);
+
+      const lpBalanceBefore = await lpContract.connect(user1).balanceOf(user1);
+
+      // Deposit token to vault
+      await convexVault.connect(user1)
         .deposit(100);
 
-      // Get vault lp balance
-      const userBalance = await (await convexVault.userInfo(lpOwner)).amount;
-      console.log(userBalance);
-      expect(userBalance).to.equal(100);
-
       // Withdraw token from vault
-      await convexVault.connect(lpOwner)
-        .withdraw(50);
+      const ret = await ((await convexVault.connect(user1)
+        .withdraw(50))).wait();
+
+      // Check event log
+      const events = ret?.logs.filter(x => x.address == vaultAddress)
+      expect(events?.length).eq(2, "Should receive 2 events"); // Claim & Withdrawn
+      if (events) {
+        expect(events[1].args[0]).eq(user1.address, "Emitted event not matched with signer");
+        expect(events[1].args[1]).eq(50, "Emitted event not matched with amount");
+      }
 
       // Should be 50 reduced
-      const lpBalanceAfter = await lpTokeContract.connect(owner).balanceOf(lpOwner);
+      const lpBalanceAfter = await lpContract.connect(user1).balanceOf(user1);
       expect(lpBalanceBefore - lpBalanceAfter).to.equal(50);
+    });
+
+    it("Failed withdraw because of insufficient balance", async function () {
+      // Current balance is 100 + 100 - 50 = 150
+      // Withdraw 200 token will be failed because of greater than balance
+      await expect(convexVault.connect(user1)
+        .withdraw(200))
+        .to.be.revertedWith('withdraw: insufficient balance');
     });
 
   })
 
   describe("Claim reward from vault", function () {
     it("Should claim CRV/CVX from vault - single user", async function () {
-      const { convexVault, owner, lpOwner } = await loadFixture(deployConvexVault);
       const vaultAddress = await convexVault.getAddress();
 
-      const [_lptoken, _token, _gauge, _crvRewards, _stash, _shutdown] = await convexVault.getConvexPoolInfo();
-
-      const depositAmount = 1e12;
+      const depositAmount = ethers.parseEther('1');
 
       // Approve amount before deposit
-      const lpTokenContract = IERC20__factory.connect(lpToken);
-      await lpTokenContract.connect(lpOwner)
-        .approve(vaultAddress, depositAmount, {
-          from: lpOwner
-        });
+      await lpContract.connect(user1)
+        .approve(vaultAddress, depositAmount);
 
-      // Get CRV balance
-      const crvTokenContract = IERC20__factory.connect(crvToken);
-      const cvxTokenContract = IERC20__factory.connect(cvxToken);
-      const crvBalance1 = await crvTokenContract.connect(lpOwner)
-        .balanceOf(lpOwner);
-      const cvxBalance1 = await cvxTokenContract.connect(lpOwner)
-        .balanceOf(lpOwner);
+      // Get CRV, CVX balance before deposit
+      const crvBalance1 = await crvContract.connect(owner)
+        .balanceOf(owner);
+      const cvxBalance1 = await cvxContract.connect(owner)
+        .balanceOf(owner);
 
       // Deposit token to vault
-      await convexVault.connect(lpOwner)
+      await convexVault.connect(user1)
         .deposit(depositAmount);
 
       // Increae 1 hour for test reward
       const block = await time.increase(3600 * 24);
-      console.log('Increased block:', block);
+      // console.log('Increased block:', block);
 
       // Claim rewards from vault
-      await convexVault.connect(lpOwner)
-        .claim(lpOwner.address);
+      const ret = await (await convexVault.connect(user1)
+        .claim(user1))
+        .wait();
 
-      // Calculate rewards
-      const rewardContract = (await IBaseRewardPool__factory.connect(_crvRewards));
-      const earnedCrv = await rewardContract.connect(lpOwner)
-        .earned(lpOwner.address);
-      console.log('Expected earned CRV:', earnedCrv)
+      // Check event log
+      const events = ret?.logs.filter(x => x.address == vaultAddress)
+      expect(events?.length).eq(1, "Should receive 1 event");
+      if (events) {
+        expect(events[0].args[0]).eq(user1.address, "Emitted event not matched with signer");
+        expect(events[0].args[1]).greaterThan(0, "Emitted event not matched with crvReward");
+        expect(events[0].args[2]).greaterThan(0, "Emitted event not matched with cvxReward");
+      }
 
-      // Check rewards distributed
-      const crvBalance2 = await crvTokenContract.connect(lpOwner)
-        .balanceOf(lpOwner);
-      const cvxBalance2 = await cvxTokenContract.connect(lpOwner)
-        .balanceOf(lpOwner);
-
-      console.log('CRV earned', crvBalance2 - crvBalance1);
-      console.log('CVX earned', cvxBalance2 - cvxBalance1);
+      // Check CVX, CRV balance after claimed
+      const crvBalance2 = await crvContract.connect(user1)
+        .balanceOf(user1);
+      const cvxBalance2 = await cvxContract.connect(user1)
+        .balanceOf(user1);
 
       expect(crvBalance2).to.greaterThan(crvBalance1);
       expect(cvxBalance2).to.greaterThan(cvxBalance1);
     });
 
+    it("Should claim CRV/CVX from vault - multiple users", async function () {
+      const vaultAddress = await convexVault.getAddress();
+
+      for (const user of [user1, user2, user3]) {
+        const depositAmount = ethers.parseEther('1');
+
+        // Approve amount before deposit
+        await lpContract.connect(user)
+          .approve(vaultAddress, depositAmount);
+
+        // Deposit token to vault
+        await convexVault.connect(user)
+          .deposit(depositAmount);
+      }
+
+      // Increae 1 hour for test reward
+      const block = await time.increase(3600 * 24);
+      // console.log('Increased block:', block);
+
+      // Claim 3rd user's rewards from vault
+      const ret = await (await convexVault.connect(user3)
+        .claim(user3))
+        .wait();
+
+      // Check event log
+      const events = ret?.logs.filter(x => x.address == vaultAddress)
+      const crvReward = events[0].args[1];
+      const cvxReward = events[0].args[2];
+      expect(crvReward).greaterThan(0, "Emitted event not matched with crvReward");
+      expect(cvxReward).greaterThan(0, "Emitted event not matched with cvxReward");
+    });
+
+    it("Should receive zero CRV/CVX after withdraw all", async function () {
+      const vaultAddress = await convexVault.getAddress();
+
+      const [amount] = await convexVault.connect(user1).userInfo(user1);
+
+      // Withdraw total tokens from vault
+      await convexVault.connect(user1)
+        .withdraw(amount);
+
+      // Increae 1 hour for test reward
+      const block = await time.increase(3600 * 24);
+      // console.log('Increased block:', block);
+
+      // Claim rewards from vault
+      const ret = await (await convexVault.connect(user1)
+        .claim(user1))
+        .wait();
+
+      // Check event log
+      const events = ret?.logs.filter(x => x.address == vaultAddress)
+      const crvReward = events[0].args[1];
+      const cvxReward = events[0].args[2];
+
+      expect(crvReward).eq(0, "Should receive 0 CRV");
+      expect(cvxReward).eq(0, "Should receive 0 CVX");
+    });
+
+    it("Should receive correct pending rewards when claim", async function () {
+      const vaultAddress = await convexVault.getAddress();
+
+      let depositAmount = 1e9;
+      await lpContract.connect(user4)
+        .approve(vaultAddress, depositAmount);
+      await convexVault.connect(user4)
+        .deposit(depositAmount);
+
+      const totalSupply = await convexVault.totalSupply();
+      console.log('Total supply:', totalSupply);
+
+      // Increae 1 hour for test reward
+      await time.increase(3600 * 24);
+      // console.log('Increased block:', block);
+
+      // Calculate pending amount
+      const pendingCrvAmount = await convexVault.pendingCrvAmount();
+
+      // Claim and compare amount
+      const ret = await (await convexVault.connect(user4)
+        .claim(user4))
+        .wait();
+
+      // Check event log
+
+    });
   })
 });

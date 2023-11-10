@@ -96,14 +96,15 @@ contract ConvexVault is Ownable {
     function deposit(uint256 _amount) external {
         require(_amount > 0, "Amount must be greater than 0");
 
+        UserInfo storage user = userInfo[msg.sender];
+
         // Get rewards from Convex and update rewards
-        if (totalSupply > 0) {
+        if (totalSupply > 0 && user.amount > 0) {
             getRewards();
             _updateRewards(msg.sender);
         }
 
         (address lpToken, , , , , ) = getConvexPoolInfo();
-        UserInfo storage user = userInfo[msg.sender];
 
         IERC20(lpToken).transferFrom(
             address(msg.sender),
@@ -114,7 +115,9 @@ contract ConvexVault is Ownable {
         user.amount = user.amount.add(_amount);
         totalSupply = totalSupply.add(_amount);
 
-        vaultStake();
+        // Deposit LP tokens to Booster contract
+        IERC20(lpToken).approve(address(CvxBooster), _amount);
+        CvxBooster.deposit(pid, _amount, true);
 
         // Emit event
         emit Deposited(msg.sender, _amount);
@@ -142,7 +145,6 @@ contract ConvexVault is Ownable {
 
     function claim(address _account) public {
         getRewards();
-
         _updateRewards(_account);
 
         UserInfo storage user = userInfo[_account];
@@ -163,6 +165,8 @@ contract ConvexVault is Ownable {
     }
 
     function getRewards() public {
+        require(totalSupply > 0, "Total supply should be greater than 0");
+
         uint256 crvBalance = CrvToken.balanceOf(address(this));
         uint256 cvxBalance = CvxToken.balanceOf(address(this));
 
@@ -172,20 +176,60 @@ contract ConvexVault is Ownable {
         uint256 updatedCrvBalance = CrvToken.balanceOf(address(this));
         uint256 updatedCvxBalance = CvxToken.balanceOf(address(this));
 
-        if (updatedCrvBalance > crvBalance || updatedCvxBalance < cvxBalance) {
+        console.log("Earned CRV: %d", updatedCrvBalance - crvBalance);
+        console.log("Earned CRV: %d", updatedCvxBalance - cvxBalance);
+
+        if (updatedCrvBalance > crvBalance) {
             rewardIndex.crvIndex +=
                 ((updatedCrvBalance - crvBalance) * MULTIPLIER) /
                 totalSupply;
+        }
+        if (updatedCvxBalance > cvxBalance) {
             rewardIndex.cvxIndex +=
                 ((updatedCvxBalance - cvxBalance) * MULTIPLIER) /
                 totalSupply;
         }
     }
 
-    function vaultStake() internal {
-        (address lpToken, , , , , ) = getConvexPoolInfo();
-        uint balance = IERC20(lpToken).balanceOf(address(this));
-        IERC20(lpToken).approve(address(CvxBooster), balance);
-        CvxBooster.deposit(pid, balance, true);
+    function pendingCrvAmount() public view returns (uint256) {
+        if (totalSupply == 0) {
+            return 0;
+        }
+
+        (, , , address crvReward, , ) = getConvexPoolInfo();
+
+        uint256 poolTotalSupply = IBaseRewardPool(crvReward).totalSupply();
+        uint256 lastUpdateTime = IBaseRewardPool(crvReward).lastUpdateTime();
+        uint256 lastTimeRewardApplicable = IBaseRewardPool(crvReward)
+            .lastTimeRewardApplicable();
+        uint256 rewardPerTokenStored = IBaseRewardPool(crvReward)
+            .userRewardPerTokenPaid(address(this));
+        uint256 rewardRate = IBaseRewardPool(crvReward).rewardRate();
+        uint256 rewards = IBaseRewardPool(crvReward).rewards(address(this));
+
+        uint256 rewardPerToken = IBaseRewardPool(crvReward).rewardPerToken();
+        uint256 storedRewardPerToken = rewardPerTokenStored;
+
+        if (poolTotalSupply == 0) {
+            return 0;
+        }
+
+        // Calculate the reward per token, taking into account the time since the last update
+        uint256 pendingReward = lastTimeRewardApplicable
+            .sub(lastUpdateTime)
+            .mul(rewardRate)
+            .mul(1e18)
+            .div(poolTotalSupply);
+
+        // Add the pending reward to the stored reward per token
+        rewardPerToken = storedRewardPerToken.add(pendingReward);
+
+        // Calculate the earned amount for the user
+        uint256 earnedAmount = totalSupply
+            .mul(rewardPerToken.sub(rewardPerTokenStored))
+            .div(1e18)
+            .add(rewards);
+
+        return earnedAmount;
     }
 }

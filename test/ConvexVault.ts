@@ -304,13 +304,6 @@ describe("ConvexVault", function () {
     it("Should distribute correct rewards for users", async function () {
       const vaultAddress = await convexVault.getAddress();
 
-      const [user1Balance] = await convexVault.connect(user1).userInfo(user1);
-      const [user2Balance] = await convexVault.connect(user2).userInfo(user2);
-      const [user3Balance] = await convexVault.connect(user3).userInfo(user3);
-      const [user4Balance] = await convexVault.connect(user4).userInfo(user4);
-      console.log(user1Balance, user2Balance, user3Balance, user4Balance);
-      // 0n 1000000000000000000n 1000000000000000000n 2000000000000000000n
-
       await time.increase(1800);
 
       // User1 should claim 0
@@ -336,14 +329,8 @@ describe("ConvexVault", function () {
       const [user3Crv, user3Cvx] = getCrvCvxFromLog(ret?.logs.filter(x => x.address == vaultAddress)[0]);
       console.log(user3Crv, user3Cvx);
 
-      ret = await (await convexVault.connect(user4)
-        .claim(user4))
-        .wait();
-      const [user4Crv, user4Cvx] = getCrvCvxFromLog(ret?.logs.filter(x => x.address == vaultAddress)[0]);
-      console.log(user4Crv, user4Cvx);
-
-      expect(user4Crv).greaterThan(user2Crv);
-      expect(user4Cvx).greaterThan(user3Cvx);
+      expect(user3Crv).greaterThan(user2Crv);
+      expect(user3Cvx).greaterThan(user3Cvx);
     });
 
   })

@@ -177,7 +177,7 @@ contract ConvexVault is Ownable {
         uint256 updatedCvxBalance = CvxToken.balanceOf(address(this));
 
         console.log("Earned CRV: %d", updatedCrvBalance - crvBalance);
-        console.log("Earned CRV: %d", updatedCvxBalance - cvxBalance);
+        console.log("Earned CVX: %d", updatedCvxBalance - cvxBalance);
 
         if (updatedCrvBalance > crvBalance) {
             rewardIndex.crvIndex +=
@@ -191,7 +191,7 @@ contract ConvexVault is Ownable {
         }
     }
 
-    function pendingCrvAmount() public view returns (uint256) {
+    function earnedVaultCrv() public view returns (uint256) {
         if (totalSupply == 0) {
             return 0;
         }
@@ -225,11 +225,41 @@ contract ConvexVault is Ownable {
         rewardPerToken = storedRewardPerToken.add(pendingReward);
 
         // Calculate the earned amount for the user
-        uint256 earnedAmount = totalSupply
+        uint256 earnedCrv = totalSupply
             .mul(rewardPerToken.sub(rewardPerTokenStored))
             .div(1e18)
             .add(rewards);
 
-        return earnedAmount;
+        return earnedCrv;
+    }
+
+    function earnedVaultCvx() public view returns (uint256) {
+        uint256 earnedCrv = earnedVaultCrv();
+        if (earnedCrv == 0) {
+            return 0;
+        }
+
+        uint256 earnedCvx = earnedCrv;
+
+        uint256 cvxSupply = CvxToken.totalSupply();
+        uint256 maxSupply = 100 * 1000000 * 1e18;
+        uint256 totalCliffs = 1000;
+        uint256 reductionPerCliff = maxSupply.div(totalCliffs);
+        uint256 cliff = cvxSupply.div(reductionPerCliff);
+
+        if (cliff < totalCliffs) {
+            //for reduction% take inverse of current cliff
+            uint256 reduction = totalCliffs.sub(cliff);
+            //reduce
+            earnedCvx = earnedCvx.mul(reduction).div(totalCliffs);
+
+            //supply cap check
+            uint256 amtTillMax = maxSupply.sub(cvxSupply);
+            if (earnedCvx > amtTillMax) {
+                earnedCvx = amtTillMax;
+            }
+        }
+
+        return earnedCvx;
     }
 }

@@ -12,7 +12,6 @@ const whaleAddress = "0x9E51BE7071F086d3A1fD5Dc0016177473619b237";
 const crvToken = "0xD533a949740bb3306d119CC777fa900bA034cd52";
 const cvxToken = "0x4e3FBD56CD56c3e72c1403e103b45Db9da5B9D2B";
 
-
 const getCurrentBlock = async () => {
   const block = await ethers.provider.getBlock('latest');
   return block?.timestamp;
@@ -266,7 +265,7 @@ describe("ConvexVault", function () {
     it("Should receive correct pending rewards when getRewards", async function () {
       const vaultAddress = await convexVault.getAddress();
 
-      let depositAmount = 1e9;
+      let depositAmount = ethers.parseEther("2");
       await lpContract.connect(user4)
         .approve(vaultAddress, depositAmount);
       await convexVault.connect(user4)
@@ -295,6 +294,7 @@ describe("ConvexVault", function () {
 
       const vaultCrvAfter = await crvContract.connect(owner).balanceOf(vaultAddress);
       const vaultCvxAfter = await cvxContract.connect(owner).balanceOf(vaultAddress);
+      console.log(vaultCrvAfter, vaultCvxAfter);
 
       expect(vaultCrvAfter - vaultCrvBefore).eq(earnedVaultCrv);
       expect(vaultCvxAfter - vaultCvxBefore).eq(earnedVaultCvx);
@@ -304,19 +304,16 @@ describe("ConvexVault", function () {
     it("Should distribute correct rewards for users", async function () {
       const vaultAddress = await convexVault.getAddress();
 
-      // const [user1Balance] = await convexVault.connect(user1).userInfo(user1);
-      // const [user2Balance] = await convexVault.connect(user2).userInfo(user2);
-      // const [user3Balance] = await convexVault.connect(user3).userInfo(user3);
-      // const [user4Balance] = await convexVault.connect(user4).userInfo(user4);
-      // console.log(user1Balance, user2Balance, user3Balance, user4Balance);
-      // 0n 1000000000000000000n 1000000000000000000n 1000000000n
+      const [user1Balance] = await convexVault.connect(user1).userInfo(user1);
+      const [user2Balance] = await convexVault.connect(user2).userInfo(user2);
+      const [user3Balance] = await convexVault.connect(user3).userInfo(user3);
+      const [user4Balance] = await convexVault.connect(user4).userInfo(user4);
+      console.log(user1Balance, user2Balance, user3Balance, user4Balance);
+      // 0n 1000000000000000000n 1000000000000000000n 2000000000000000000n
 
       await time.increase(1800);
 
-      const currentBlock = await getCurrentBlock();
-
       // User1 should claim 0
-      mine(currentBlock);
       let ret = await (await convexVault.connect(user1)
         .claim(user1))
         .wait();
@@ -327,11 +324,26 @@ describe("ConvexVault", function () {
       expect(user1Cvx).eq(0);
 
       // User2 and user3 should claim same amount
-      mine(currentBlock);
       ret = await (await convexVault.connect(user2)
         .claim(user2))
         .wait();
       const [user2Crv, user2Cvx] = getCrvCvxFromLog(ret?.logs.filter(x => x.address == vaultAddress)[0]);
+      console.log(user2Crv, user2Cvx);
+
+      ret = await (await convexVault.connect(user3)
+        .claim(user3))
+        .wait();
+      const [user3Crv, user3Cvx] = getCrvCvxFromLog(ret?.logs.filter(x => x.address == vaultAddress)[0]);
+      console.log(user3Crv, user3Cvx);
+
+      ret = await (await convexVault.connect(user4)
+        .claim(user4))
+        .wait();
+      const [user4Crv, user4Cvx] = getCrvCvxFromLog(ret?.logs.filter(x => x.address == vaultAddress)[0]);
+      console.log(user4Crv, user4Cvx);
+
+      expect(user4Crv).greaterThan(user2Crv);
+      expect(user4Cvx).greaterThan(user3Cvx);
     });
 
   })

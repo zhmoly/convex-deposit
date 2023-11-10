@@ -176,9 +176,6 @@ contract ConvexVault is Ownable {
         uint256 updatedCrvBalance = CrvToken.balanceOf(address(this));
         uint256 updatedCvxBalance = CvxToken.balanceOf(address(this));
 
-        console.log("Earned CRV: %d", updatedCrvBalance - crvBalance);
-        console.log("Earned CVX: %d", updatedCvxBalance - cvxBalance);
-
         if (updatedCrvBalance > crvBalance) {
             rewardIndex.crvIndex +=
                 ((updatedCrvBalance - crvBalance) * MULTIPLIER) /

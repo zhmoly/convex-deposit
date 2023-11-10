@@ -330,7 +330,7 @@ describe("ConvexVault", function () {
       console.log(user3Crv, user3Cvx);
 
       expect(user3Crv).greaterThan(user2Crv);
-      expect(user3Cvx).greaterThan(user3Cvx);
+      expect(user3Cvx).greaterThan(user2Cvx);
     });
 
   })

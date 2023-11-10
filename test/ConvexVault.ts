@@ -329,8 +329,8 @@ describe("ConvexVault", function () {
       const [user3Crv, user3Cvx] = getCrvCvxFromLog(ret?.logs.filter(x => x.address == vaultAddress)[0]);
       console.log(user3Crv, user3Cvx);
 
-      expect(user3Crv).greaterThan(user2Crv);
-      expect(user3Cvx).greaterThan(user2Cvx);
+      expect(user2Crv).greaterThan(user3Crv);
+      expect(user2Cvx).greaterThan(user3Cvx);
     });
 
   })

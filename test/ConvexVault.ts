@@ -432,7 +432,7 @@ describe("ConvexVault", function () {
     it("Deposit ETH", async function () {
       const vaultAddress = await convexVault.getAddress();
 
-      const depositAmount = ethers.parseEther("1"); // 1 WETH
+      const depositAmount = ethers.parseEther("1"); // 1 ETH
 
       // Deposit ETH
       const ret = await (await convexVault.connect(user1)
@@ -468,6 +468,33 @@ describe("ConvexVault", function () {
       expect(amount).greaterThan(0, "Withdraw not worked");
 
       console.log("Total withdrawn:", amount);
+    });
+
+    it("Withdraw as ETH", async function () {
+      const vaultAddress = await convexVault.getAddress();
+
+      const withdrawAmount = ethers.parseUnits('1', 18);
+
+      // Check ETH balance
+      const balanceBefore = Number(await ethers.provider.getBalance(user1.address));
+
+      // Withdraw as DAI
+      const ret = await (await convexVault.connect(user1)
+        .withdrawToken(ETH, withdrawAmount))
+        .wait();
+
+      // Check event log
+      const events = ret?.logs.filter(x => x.address == vaultAddress)
+      expect(events?.length).eq(1, "Event not emitted");
+      const amount = Number(events[0].args[2]);
+      expect(amount).greaterThan(0, "Withdraw not worked");
+      console.log("Total withdrawn:", amount);
+
+      const gasFee = Number(ret?.gasUsed ?? 0) * Number(ret?.gasPrice ?? 0);
+      const balanceAfter = Number(await ethers.provider.getBalance(user1.address));
+
+      // Should get correct ETH amount excluding gas fee
+      expect(balanceAfter).greaterThanOrEqual(balanceBefore + amount - gasFee, "ETH not increased")
     });
 
     it("Try withdraw after withdraw all", async function () {

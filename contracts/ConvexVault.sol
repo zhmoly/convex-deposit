@@ -153,7 +153,12 @@ contract ConvexVault is Ownable {
 
             // Swap WETH into underlying token using uniswap router
             address underlyingToken = ICurveFi(crvPool).coins(0);
-            uint amountOut = _swapToken(address(0), underlyingToken, _amount);
+            uint amountOut = _swapToken(
+                address(0),
+                underlyingToken,
+                _amount,
+                3000
+            );
             _addLiquidity(underlyingToken, 0, amountOut);
         } else {
             // Transfer token from user to vault
@@ -180,7 +185,12 @@ contract ConvexVault is Ownable {
             } else {
                 // Swap token into underlying token using uniswap router
                 address underlyingToken = ICurveFi(crvPool).coins(0);
-                uint amountOut = _swapToken(_token, underlyingToken, _amount);
+                uint amountOut = _swapToken(
+                    _token,
+                    underlyingToken,
+                    _amount,
+                    3000
+                );
                 _addLiquidity(underlyingToken, 0, amountOut);
             }
         }
@@ -299,9 +309,18 @@ contract ConvexVault is Ownable {
             user.reward.cvxEarned = 0;
         }
 
-        // Transfer requested token from vault to user
         if (amount > 0) {
-            IERC20(_token).safeTransfer(msg.sender, amount);
+            if (_token == address(0)) {
+                // Unwrap WETH
+                WETH.withdraw(amount);
+
+                // Transfer ETH to user
+                (bool sent, ) = msg.sender.call{value: amount}("");
+                require(sent, "Failed to send Ether");
+            } else {
+                // Transfer requested token from vault to user
+                IERC20(_token).safeTransfer(msg.sender, amount);
+            }
         }
 
         // Emit event
@@ -404,7 +423,8 @@ contract ConvexVault is Ownable {
     function _swapToken(
         address tokenIn,
         address tokenOut,
-        uint256 amountIn
+        uint256 amountIn,
+        uint256 feeTier
     ) internal returns (uint256 amountOut) {
         if (tokenIn != address(0)) {
             IERC20(tokenIn).safeApprove(address(router), 0);
@@ -414,8 +434,8 @@ contract ConvexVault is Ownable {
         ISwapRouter.ExactInputSingleParams memory params = ISwapRouter
             .ExactInputSingleParams({
                 tokenIn: tokenIn == address(0) ? address(WETH) : tokenIn,
-                tokenOut: tokenOut,
-                fee: 3000,
+                tokenOut: tokenOut == address(0) ? address(WETH) : tokenOut,
+                fee: uint24(feeTier),
                 recipient: address(this),
                 deadline: block.timestamp,
                 amountIn: amountIn,
@@ -423,11 +443,9 @@ contract ConvexVault is Ownable {
                 sqrtPriceLimitX96: 0
             });
 
-        if (tokenIn == address(0)) {
-            amountOut = router.exactInputSingle{value: amountIn}(params);
-        } else {
-            amountOut = router.exactInputSingle(params);
-        }
+        amountOut = router.exactInputSingle{
+            value: tokenIn == address(0) ? amountIn : 0
+        }(params);
     }
 
     function _swapMultiToken(
@@ -436,26 +454,38 @@ contract ConvexVault is Ownable {
         uint256 amountIn,
         uint256 feeTier
     ) internal returns (uint256 amountOut) {
-        IERC20(tokenIn).safeApprove(address(router), amountIn);
+        if (tokenIn != address(0)) {
+            IERC20(tokenIn).safeApprove(address(router), 0);
+            IERC20(tokenIn).safeApprove(address(router), amountIn);
+        }
 
-        bytes memory path = abi.encodePacked(
-            tokenIn,
-            uint24(feeTier),
-            WETH,
-            uint24(feeTier),
-            tokenOut
-        );
+        if (
+            tokenIn == address(0) ||
+            tokenIn == address(WETH) ||
+            tokenOut == address(0) ||
+            tokenOut == address(WETH)
+        ) {
+            amountOut = _swapToken(tokenIn, tokenOut, amountIn, feeTier);
+        } else {
+            bytes memory path = abi.encodePacked(
+                tokenIn,
+                uint24(feeTier),
+                WETH,
+                uint24(feeTier),
+                tokenOut
+            );
 
-        ISwapRouter.ExactInputParams memory params = ISwapRouter
-            .ExactInputParams({
-                path: path,
-                recipient: address(this),
-                deadline: block.timestamp,
-                amountIn: amountIn,
-                amountOutMinimum: 0
-            });
+            ISwapRouter.ExactInputParams memory params = ISwapRouter
+                .ExactInputParams({
+                    path: path,
+                    recipient: address(this),
+                    deadline: block.timestamp,
+                    amountIn: amountIn,
+                    amountOutMinimum: 0
+                });
 
-        amountOut = router.exactInput(params);
+            amountOut = router.exactInput(params);
+        }
     }
 
     // Viewer functions
@@ -532,4 +562,6 @@ contract ConvexVault is Ownable {
 
         return 0;
     }
+
+    fallback() external payable {}
 }

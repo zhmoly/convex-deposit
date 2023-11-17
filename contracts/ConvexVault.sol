@@ -263,10 +263,11 @@ contract ConvexVault is Ownable {
                 amount += tokenBalance;
             } else {
                 // swap into requested token
-                uint amountOut = _swapToken(
+                uint amountOut = _swapMultiToken(
                     underlyingToken,
                     _token,
-                    tokenBalance
+                    tokenBalance,
+                    3000
                 );
                 console.log("%s swap: %d", underlyingToken, amountOut);
                 amount += amountOut;

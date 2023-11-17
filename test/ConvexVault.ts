@@ -493,10 +493,12 @@ describe("ConvexVault", function () {
       let events = ret1?.logs.filter(x => x.address == vaultAddress)
       expect(events[0].args[2]).greaterThan(0, "Deposit token not worked");
 
+      await time.increase(3600);
+
       // Try withdraw
       const [balance] = await convexVault.userInfo(user1);
       const ret2 = await (await convexVault.connect(user1)
-        .withdrawToken(USDT, balance))
+        .withdrawToken(DAI, balance))
         .wait();
       events = ret2?.logs.filter(x => x.address == vaultAddress)
       expect(events[0].args[2]).greaterThan(0, "Withdraw token not worked");
